@@ -109,8 +109,14 @@ __FBSDID("$FreeBSD: release/10.1.0/sys/netpfil/pf/pf.c 271306 2014-09-09 10:29:2
 /* DTrace probes */
 
 SDT_PROVIDER_DEFINE(pf);
-SDT_PROBE_DEFINE1(pf,  ,  , state__create, "struct pf_state *");
-SDT_PROBE_DEFINE1(pf,  ,  , state__destroy, "struct pf_state *");
+
+/*
+SDT_PROBE_DEFINE1(pf, , , state__create, "struct pf_state *");
+SDT_PROBE_DEFINE1(pf, , , state__destroy, "struct pf_state *");
+*/
+
+SDT_PROBE_DEFINE1_XLATE(pf, , , state__create,  "struct pf_state *", "pfstate_t *" );
+SDT_PROBE_DEFINE1_XLATE(pf, , , state__destroy, "struct pf_state *", "pfstate_t *" );
 
 #define	PF_PROBE(probe, arg0) SDT_PROBE1(pf, , , probe, arg0)
 
