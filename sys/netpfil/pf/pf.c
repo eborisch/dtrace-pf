@@ -42,6 +42,7 @@ __FBSDID("$FreeBSD: release/10.1.0/sys/netpfil/pf/pf.c 271306 2014-09-09 10:29:2
 #include "opt_inet6.h"
 #include "opt_bpf.h"
 #include "opt_pf.h"
+#include "opt_kdtrace.h"
 
 #include <sys/param.h>
 #include <sys/bus.h>
@@ -55,6 +56,7 @@ __FBSDID("$FreeBSD: release/10.1.0/sys/netpfil/pf/pf.c 271306 2014-09-09 10:29:2
 #include <sys/md5.h>
 #include <sys/random.h>
 #include <sys/refcount.h>
+#include <sys/sdt.h>
 #include <sys/socket.h>
 #include <sys/sysctl.h>
 #include <sys/taskqueue.h>
@@ -103,6 +105,14 @@ __FBSDID("$FreeBSD: release/10.1.0/sys/netpfil/pf/pf.c 271306 2014-09-09 10:29:2
 /*
  * Global variables
  */
+
+/* DTrace probes */
+
+SDT_PROVIDER_DEFINE(pf);
+SDT_PROBE_DEFINE1(pf,  ,  , state__create, "struct pf_state *");
+SDT_PROBE_DEFINE1(pf,  ,  , state__destroy, "struct pf_state *");
+
+#define	PF_PROBE(probe, arg0) SDT_PROBE1(pf, , , probe, arg0)
 
 /* state tables */
 VNET_DEFINE(struct pf_altqqueue,	 pf_altqs[2]);
@@ -1610,11 +1620,12 @@ pf_unlink_state(struct pf_state *s, u_int flags)
 void
 pf_free_state(struct pf_state *cur)
 {
-
 	KASSERT(cur->refs == 0, ("%s: %p has refs", __func__, cur));
 	KASSERT(cur->timeout == PFTM_UNLINKED, ("%s: timeout %u", __func__,
 	    cur->timeout));
 
+    PF_PROBE(state__destroy, cur);
+    
 	pf_normalize_tcp_cleanup(cur);
 	uma_zfree(V_pf_state_z, cur);
 	counter_u64_add(V_pf_status.fcounters[FCNT_STATE_REMOVALS], 1);
@@ -3577,8 +3588,9 @@ pf_create_state(struct pf_rule *r, struct pf_rule *nr, struct pf_rule *a,
 		sk = pf_state_key_setup(pd, pd->src, pd->dst, sport, dport);
 		if (sk == NULL)
 			goto csfailed;
-		nk = sk;
-	} else
+
+        nk = sk;
+    } else
 		KASSERT((sk != NULL && nk != NULL), ("%s: nr %p sk %p, nk %p",
 		    __func__, nr, sk, nk));
 
@@ -3632,6 +3644,8 @@ pf_create_state(struct pf_rule *r, struct pf_rule *nr, struct pf_rule *a,
 		return (PF_SYNPROXY_DROP);
 	}
 
+    PF_PROBE(state__create, s);
+    
 	return (PF_PASS);
 
 csfailed:
