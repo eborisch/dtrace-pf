@@ -1,9 +1,9 @@
-= About
+# About
 
 The master branch is the /usr/src directory (-r274417) on FreeBSD 10. The
 pftrace branch contains the pf dtrace provider.
 
-= Usage
+# Usage
 
 With the provider compiled, you can create DTrace scripts to watch for state
 create and destroy events like the following:
