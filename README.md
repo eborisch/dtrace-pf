@@ -24,16 +24,18 @@ pf*:::state-change
             s.dst_ip );
 }
 
-/* When both peers disconect */
+/* When both peers disconnect */
 pf*:::state-change
 / args[0]->src.state == TCPS_FIN_WAIT_2 && args[0]->dst.state == TCPS_FIN_WAIT_2 /
 {
     s = *args[0];
-    printf( "pf:::state-change:finwait2(%u) %s %s %s",
+    printf( "pf:::state:tcp-closed(%u) %s %s %s tx_bytes: %u rx_bytes: %u",
             s.id,
             s.src_ip,
             s.direction,
-            s.dst_ip );
+            s.dst_ip
+            s.rec->bytes[src_idx],
+            s.rec->bytes[dst_idx] );
 }
 
 /* Generic event of peer connections established */
@@ -51,11 +53,13 @@ pf*:::tcp-established
 pf*:::tcp-closed
 {
     s = *args[0];
-    printf( "pf:::state:tcp-closed(%u) %s %s %s",
+    printf( "pf:::state:tcp-closed(%u) %s %s %s tx_bytes: %u rx_bytes: %u",
             s.id,
             s.src_ip,
             s.direction,
-            s.dst_ip );
+            s.dst_ip
+            s.rec->bytes[src_idx],
+            s.rec->bytes[dst_idx] );
 }
 
 /* When a new pf state is created */
