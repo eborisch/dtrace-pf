@@ -112,13 +112,17 @@ SDT_PROVIDER_DEFINE(pf);
 
 /*
 SDT_PROBE_DEFINE1(pf, , , state__create, "struct pf_state *");
+SDT_PROBE_DEFINE3(pf, , , state__change, "struct pf_state *", "uint8_t", "uint32_t");
 SDT_PROBE_DEFINE1(pf, , , state__destroy, "struct pf_state *");
 */
 
-SDT_PROBE_DEFINE1_XLATE(pf, , , state__create,  "struct pf_state *", "pfstate_t *" );
-SDT_PROBE_DEFINE1_XLATE(pf, , , state__destroy, "struct pf_state *", "pfstate_t *" );
+SDT_PROBE_DEFINE1(pf, , , state__create, "struct pf_state *");
+SDT_PROBE_DEFINE1(pf, , , state__destroy, "struct pf_state *");
+SDT_PROBE_DEFINE1_XLATE(pf, , , state__change, "struct pf_state *", "pfstate_t *");
+SDT_PROBE_DEFINE1_XLATE(pf, , , tcp__established, "struct pf_state *", "pfstate_t *");
+SDT_PROBE_DEFINE1_XLATE(pf, , , tcp__closed, "struct pf_state *", "pfstate_t *");
 
-#define	PF_PROBE(probe, arg0) SDT_PROBE1(pf, , , probe, arg0)
+#define	PF_PROBE1(probe, arg0) SDT_PROBE1(pf, , , probe, arg0)
 
 /* state tables */
 VNET_DEFINE(struct pf_altqqueue,	 pf_altqs[2]);
@@ -500,7 +504,8 @@ pf_src_connlimit(struct pf_state **state)
 	/* Kill this state. */
 	(*state)->timeout = PFTM_PURGE;
 	(*state)->src.state = (*state)->dst.state = TCPS_CLOSED;
-
+    PF_PROBE1(state__change, *state);
+    
 	if ((*state)->rule.ptr->overload_tbl == NULL)
 		return (1);
 
@@ -601,6 +606,7 @@ pf_overload_task(void *v, int pending)
 			    PF_AEQ(&pfoe->addr, &sk->addr[0], sk->af)))) {
 				s->timeout = PFTM_PURGE;
 				s->src.state = s->dst.state = TCPS_CLOSED;
+                PF_PROBE1(state__change, s);
 				killed++;
 			}
 		}
@@ -1630,7 +1636,7 @@ pf_free_state(struct pf_state *cur)
 	KASSERT(cur->timeout == PFTM_UNLINKED, ("%s: timeout %u", __func__,
 	    cur->timeout));
 
-    PF_PROBE(state__destroy, cur);
+    PF_PROBE1(state__destroy, cur);
     
 	pf_normalize_tcp_cleanup(cur);
 	uma_zfree(V_pf_state_z, cur);
@@ -3517,7 +3523,7 @@ pf_create_state(struct pf_rule *r, struct pf_rule *nr, struct pf_rule *a,
 		s->dst.seqhi = 1;
 		s->dst.max_win = 1;
 		s->src.state = TCPS_SYN_SENT;
-		s->dst.state = TCPS_CLOSED;
+		s->dst.state = TCPS_CLOSED;        
 		s->timeout = PFTM_TCP_FIRST_PACKET;
 		break;
 	case IPPROTO_UDP:
@@ -3650,7 +3656,7 @@ pf_create_state(struct pf_rule *r, struct pf_rule *nr, struct pf_rule *a,
 		return (PF_SYNPROXY_DROP);
 	}
 
-    PF_PROBE(state__create, s);
+    PF_PROBE1(state__create, s);
     
 	return (PF_PASS);
 
@@ -3947,28 +3953,40 @@ pf_tcp_track_full(struct pf_state_peer *src, struct pf_state_peer *dst,
 			if (src->state < TCPS_SYN_SENT)
 				src->state = TCPS_SYN_SENT;
 		if (th->th_flags & TH_FIN)
-			if (src->state < TCPS_CLOSING)
+			if (src->state < TCPS_CLOSING) {
 				src->state = TCPS_CLOSING;
-		if (th->th_flags & TH_ACK) {
+                PF_PROBE1(state__change, *state);
+            }
+        if (th->th_flags & TH_ACK) {
 			if (dst->state == TCPS_SYN_SENT) {
 				dst->state = TCPS_ESTABLISHED;
+                PF_PROBE1(state__change, *state);
 				if (src->state == TCPS_ESTABLISHED &&
 				    (*state)->src_node != NULL &&
 				    pf_src_connlimit(state)) {
 					REASON_SET(reason, PFRES_SRCLIMIT);
 					return (PF_DROP);
 				}
-			} else if (dst->state == TCPS_CLOSING)
+                if (src->state == TCPS_ESTABLISHED) {
+                    PF_PROBE1(tcp__established, *state);
+                }
+			} else if (dst->state == TCPS_CLOSING) {            
 				dst->state = TCPS_FIN_WAIT_2;
-		}
+                PF_PROBE1(state__change, *state);
+                if (src->state == TCPS_FIN_WAIT_2) {
+                    PF_PROBE1(tcp__closed, *state);
+                }
+            }
+        }
 		if (th->th_flags & TH_RST)
 			src->state = dst->state = TCPS_TIME_WAIT;
 
 		/* update expire time */
 		(*state)->expire = time_uptime;
 		if (src->state >= TCPS_FIN_WAIT_2 &&
-		    dst->state >= TCPS_FIN_WAIT_2)
+		    dst->state >= TCPS_FIN_WAIT_2) {
 			(*state)->timeout = PFTM_TCP_CLOSED;
+        }
 		else if (src->state >= TCPS_CLOSING &&
 		    dst->state >= TCPS_CLOSING)
 			(*state)->timeout = PFTM_TCP_FIN_WAIT;
@@ -4046,8 +4064,10 @@ pf_tcp_track_full(struct pf_state_peer *src, struct pf_state_peer *dst,
 		 */
 
 		if (th->th_flags & TH_FIN)
-			if (src->state < TCPS_CLOSING)
+			if (src->state < TCPS_CLOSING) {
 				src->state = TCPS_CLOSING;
+                PF_PROBE1(state__change, *state);
+            }
 		if (th->th_flags & TH_RST)
 			src->state = dst->state = TCPS_TIME_WAIT;
 
@@ -4104,20 +4124,29 @@ pf_tcp_track_sloppy(struct pf_state_peer *src, struct pf_state_peer *dst,
 		if (src->state < TCPS_SYN_SENT)
 			src->state = TCPS_SYN_SENT;
 	if (th->th_flags & TH_FIN)
-		if (src->state < TCPS_CLOSING)
+		if (src->state < TCPS_CLOSING) {
 			src->state = TCPS_CLOSING;
+            PF_PROBE1(state__change, *state);
+        }
 	if (th->th_flags & TH_ACK) {
 		if (dst->state == TCPS_SYN_SENT) {
 			dst->state = TCPS_ESTABLISHED;
+            PF_PROBE1(state__change, *state);
 			if (src->state == TCPS_ESTABLISHED &&
 			    (*state)->src_node != NULL &&
 			    pf_src_connlimit(state)) {
 				REASON_SET(reason, PFRES_SRCLIMIT);
 				return (PF_DROP);
 			}
+            if (src->state == TCPS_ESTABLISHED) {
+                PF_PROBE1(tcp__established, *state);
+            }            
 		} else if (dst->state == TCPS_CLOSING) {
 			dst->state = TCPS_FIN_WAIT_2;
-		} else if (src->state == TCPS_SYN_SENT &&
+            if (src->state == TCPS_FIN_WAIT_2) {
+                PF_PROBE1(tcp__closed, *state);
+            }
+        } else if (src->state == TCPS_SYN_SENT &&
 		    dst->state < TCPS_SYN_SENT) {
 			/*
 			 * Handle a special sloppy case where we only see one
@@ -4126,6 +4155,8 @@ pf_tcp_track_sloppy(struct pf_state_peer *src, struct pf_state_peer *dst,
 			 * the destination, set the connection to established.
 			 */
 			dst->state = src->state = TCPS_ESTABLISHED;
+            PF_PROBE1(state__change, *state);
+            PF_PROBE1(tcp__established, *state);
 			if ((*state)->src_node != NULL &&
 			    pf_src_connlimit(state)) {
 				REASON_SET(reason, PFRES_SRCLIMIT);
@@ -4140,6 +4171,7 @@ pf_tcp_track_sloppy(struct pf_state_peer *src, struct pf_state_peer *dst,
 			 * handshake.
 			 */
 			dst->state = TCPS_CLOSING;
+            PF_PROBE1(state__change, *state);
 		}
 	}
 	if (th->th_flags & TH_RST)
@@ -4294,6 +4326,7 @@ pf_test_state_tcp(struct pf_state **state, int direction, struct pfi_kif *kif,
 		}
 		/* XXX make sure it's the same direction ?? */
 		(*state)->src.state = (*state)->dst.state = TCPS_CLOSED;
+        PF_PROBE1(state__change, *state);
 		pf_unlink_state(*state, PF_ENTER_LOCKED);
 		*state = NULL;
 		return (PF_DROP);

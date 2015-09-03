@@ -31,8 +31,10 @@ typedef struct pfstate {
     uint64_t id;              /* protocol */
     uint32_t protocol;        /* protocol */
     string direction;         /* direction  */
-    struct pf_state_key *src; /* raw src pf_state_key */
-    struct pf_state_key *dst; /* raw dst pf_state_key */
+    struct pf_state_peer src; /* raw src pf_state_peer */
+    struct pf_state_peer dst; /* raw dst pf_state_peer */
+    struct pf_state_key *src_key; /* raw src pf_state_key */
+    struct pf_state_key *dst_key; /* raw dst pf_state_key */
     string src_ip;            /* source address, as a string */
     string dst_ip;            /* dest address, as a string */
     struct pf_state *rec;     /* raw pf_state record */
@@ -43,8 +45,10 @@ translator pfstate_t < struct pf_state *s > {
     id        = s->id;
     protocol  = s->key[PF_SK_STACK]->proto;
     direction = s->direction == PF_IN ? "<-" : "->";
-    src       = s->key[PF_SK_STACK];
-    dst       = s->key[PF_SK_WIRE];
+    src       = s->src;
+    dst       = s->dst;
+    src_key   = s->key[PF_SK_STACK];
+    dst_key   = s->key[PF_SK_WIRE];
     src_ip    = s->key[PF_SK_STACK]->af == AF_INET ?
         inet_ntoa(&(s->key[PF_SK_STACK]->addr[src_idx].pfa.v4.s_addr)) :
         inet_ntoa6(&(s->key[PF_SK_STACK]->addr[src_idx].pfa.v6));
