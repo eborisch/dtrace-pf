@@ -8,8 +8,11 @@ pftrace branch contains the pf dtrace provider.
 # Usage
 
 With this provider you can use DTrace to watch for pf state changes, general TCP
-establish/close events, and raw state create/destroy events. The following
-script covers illustrates basic use:
+establish/close events, and raw state create/destroy events. Translated IP
+addresses/ports are also made available in the case of NAT and port forwarding
+(see the tcp-established and tcp-closed examples below).
+
+The following script covers illustrates basic use:
 
 ```
 /* When both peers are established */
@@ -38,26 +41,38 @@ pf*:::state-change
             s.rec->bytes[dst_idx] );
 }
 
-/* Generic event of peer connections established */
+/* When both peer connections are established. Translated ip/port in parens. */
 pf*:::tcp-established
 {
     s = *args[0];
-    printf( "pf:::state:tcp-established(%u) %s %s %s",
+    printf( "pf:::state:tcp-established(%u) %s:%u (%s:%u) %s %s:%u (%s:%u)",
             s.id,
             s.src_ip,
+            s.src_port,
+            s.trans_src_ip,
+            s.trans_src_port,
             s.direction,
-            s.dst_ip );
+            s.dst_ip,
+            s.dst_port,
+            s.trans_dst_ip,
+            s.trans_dst_port );
 }
 
-/* Generic event of peer connections closed */
+/* When both peer connections are closed. Translated ip/port in parens. */
 pf*:::tcp-closed
 {
     s = *args[0];
-    printf( "pf:::state:tcp-closed(%u) %s %s %s tx_bytes: %u rx_bytes: %u",
+    printf( "pf:::state:tcp-closed(%u) %s:%u (%s:%u) %s %s:%u (%s:%u) %u %u",
             s.id,
             s.src_ip,
+            s.src_port,
+            s.trans_src_ip,
+            s.trans_src_port,
             s.direction,
-            s.dst_ip
+            s.dst_ip,
+            s.dst_port,
+            s.trans_dst_ip,
+            s.trans_dst_port,
             s.rec->bytes[src_idx],
             s.rec->bytes[dst_idx] );
 }
