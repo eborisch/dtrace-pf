@@ -27,33 +27,93 @@ enum { PFTM_TCP_FIRST_PACKET, PFTM_TCP_OPENING, PFTM_TCP_ESTABLISHED,
 
 enum { src_idx = 1, dst_idx = 0 };
 
+/* This is a simplified pf_state structure. It accounts for direction and
+** translation (NAT/RDR) and it generally makes things a lot easier to figure
+** out. See pfvarh.h for additional info on the sub structures.
+*/
 typedef struct pfstate {
-    uint64_t id;              /* protocol */
-    uint32_t protocol;        /* protocol */
-    string direction;         /* direction  */
-    struct pf_state_peer src; /* raw src pf_state_peer */
-    struct pf_state_peer dst; /* raw dst pf_state_peer */
-    struct pf_state_key *src_key; /* raw src pf_state_key */
-    struct pf_state_key *dst_key; /* raw dst pf_state_key */
-    string src_ip;            /* source address, as a string */
-    string dst_ip;            /* dest address, as a string */
-    struct pf_state *rec;     /* raw pf_state record */
+    uint64_t id;                        /* connection id                     */
+    uint32_t protocol;                  /* protocol                          */
+    string direction;                   /* direction -- '<' (in) : '>' (out) */
+    struct pf_state_peer src;           /* src pf_state_peer                 */
+    struct pf_state_peer dst;           /* dst pf_state_peer                 */
+    struct pf_state_key *src_key;       /* src pf_state_key                  */
+    struct pf_state_key *trans_src_key; /* translated raw src pf_state_key   */
+    struct pf_state_key *dst_key;       /* dst pf_state_key                  */
+    struct pf_state_key *trans_dst_key; /* translated dst pf_state_key       */
+    string src_ip;                      /* source ip, as a string            */
+    string trans_src_ip;                /* translated source ip, as a string */
+    uint16_t src_port;                  /* source port                       */
+    uint16_t trans_src_port;            /* translated source port            */
+    string dst_ip;                      /* dest ip, as a string              */
+    string trans_dst_ip;                /* dest ip, as a string              */
+    uint16_t dst_port;                  /* translated dest port              */
+    uint16_t trans_dst_port;            /* source port                       */
+    struct pf_state *rec;               /* raw pf_state record               */
 } pfstate_t;
 
 #pragma D binding "1.0" translator
 translator pfstate_t < struct pf_state *s > {
-    id        = s->id;
-    protocol  = s->key[PF_SK_STACK]->proto;
-    direction = s->direction == PF_IN ? "<-" : "->";
-    src       = s->src;
-    dst       = s->dst;
-    src_key   = s->key[PF_SK_STACK];
-    dst_key   = s->key[PF_SK_WIRE];
-    src_ip    = s->key[PF_SK_STACK]->af == AF_INET ?
-        inet_ntoa(&(s->key[PF_SK_STACK]->addr[src_idx].pfa.v4.s_addr)) :
-        inet_ntoa6(&(s->key[PF_SK_STACK]->addr[src_idx].pfa.v6));
-    dst_ip    = s->key[PF_SK_WIRE]->af == AF_INET ?
-        inet_ntoa(&(s->key[PF_SK_WIRE]->addr[dst_idx].pfa.v4.s_addr)) :
-        inet_ntoa6(&(s->key[PF_SK_WIRE]->addr[dst_idx].pfa.v6));
-    rec       = s;
+    id            = s->id;
+    protocol      = s->key[PF_SK_STACK]->proto;
+    direction     = s->direction == PF_OUT ? ">" : "<";
+    src           = s->direction == PF_OUT ? s->src : s->dst;
+    dst           = s->direction == PF_OUT ? s->dst : s->src;
+    src_key       = s->direction == PF_OUT ? s->key[PF_SK_STACK] : s->key[PF_SK_WIRE];
+    trans_src_key = s->direction == PF_OUT ? s->key[PF_SK_WIRE]  : s->key[PF_SK_WIRE];
+    dst_key       = s->key[PF_SK_WIRE];
+
+    src_ip = s->direction == PF_OUT ?
+             s->key[PF_SK_STACK]->af == AF_INET ?
+             inet_ntoa(&(s->key[PF_SK_STACK]->addr[src_idx].pfa.v4.s_addr)) :
+             inet_ntoa6(&(s->key[PF_SK_STACK]->addr[src_idx].pfa.v6))
+             :
+             s->key[PF_SK_WIRE]->af == AF_INET ?
+             inet_ntoa(&(s->key[PF_SK_WIRE]->addr[src_idx].pfa.v4.s_addr)) :
+             inet_ntoa6(&(s->key[PF_SK_WIRE]->addr[src_idx].pfa.v6));
+
+    trans_src_ip = s->direction == PF_OUT ?
+             s->key[PF_SK_WIRE]->af == AF_INET ?
+             inet_ntoa(&(s->key[PF_SK_WIRE]->addr[src_idx].pfa.v4.s_addr)) :
+             inet_ntoa6(&(s->key[PF_SK_WIRE]->addr[src_idx].pfa.v6))
+             :
+             s->key[PF_SK_STACK]->af == AF_INET ?
+             inet_ntoa(&(s->key[PF_SK_STACK]->addr[src_idx].pfa.v4.s_addr)) :
+             inet_ntoa6(&(s->key[PF_SK_STACK]->addr[src_idx].pfa.v6));
+    
+    src_port = s->direction == PF_OUT ?
+             ntohs(s->key[PF_SK_STACK]->port[src_idx]) :
+             ntohs(s->key[PF_SK_WIRE]->port[src_idx]);
+
+    trans_src_port = s->direction == PF_OUT ?
+             ntohs(s->key[PF_SK_WIRE]->port[src_idx]) :
+             ntohs(s->key[PF_SK_STACK]->port[src_idx]);
+    
+    dst_ip = s->direction == PF_OUT ?
+             s->key[PF_SK_WIRE]->af == AF_INET ?
+             inet_ntoa(&(s->key[PF_SK_WIRE]->addr[dst_idx].pfa.v4.s_addr)) :
+             inet_ntoa6(&(s->key[PF_SK_WIRE]->addr[dst_idx].pfa.v6))
+             :
+             s->key[PF_SK_STACK]->af == AF_INET ?
+             inet_ntoa(&(s->key[PF_SK_STACK]->addr[dst_idx].pfa.v4.s_addr)) :
+             inet_ntoa6(&(s->key[PF_SK_STACK]->addr[dst_idx].pfa.v6));
+
+    trans_dst_ip = s->direction == PF_OUT ?
+             s->key[PF_SK_STACK]->af == AF_INET ?
+             inet_ntoa(&(s->key[PF_SK_STACK]->addr[dst_idx].pfa.v4.s_addr)) :
+             inet_ntoa6(&(s->key[PF_SK_STACK]->addr[dst_idx].pfa.v6))
+             :
+             s->key[PF_SK_WIRE]->af == AF_INET ?
+             inet_ntoa(&(s->key[PF_SK_WIRE]->addr[dst_idx].pfa.v4.s_addr)) :
+             inet_ntoa6(&(s->key[PF_SK_WIRE]->addr[dst_idx].pfa.v6));
+    
+    dst_port = s->direction == PF_OUT ?
+             ntohs(s->key[PF_SK_WIRE]->port[dst_idx]) :
+             ntohs(s->key[PF_SK_STACK]->port[dst_idx]);
+    
+    trans_dst_port = s->direction == PF_OUT ?
+             ntohs(s->key[PF_SK_STACK]->port[dst_idx]) :
+             ntohs(s->key[PF_SK_WIRE]->port[dst_idx]);
+
+    rec = s;
 };
